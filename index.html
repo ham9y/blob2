@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Soft Blob</title>
+<!-- PWA Meta Tags -->
+<meta name="theme-color" content="#0d1b2a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Soft Blob">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Soft Blob">
+<meta name="description" content="Interactive soft-body blob simulation">
 <style>
   :root {
     --accent: hsl(25, 68%, 52%);
@@ -140,12 +148,28 @@
   }
   .opts-action:hover { border-color: var(--accent); background: rgba(255,255,255,0.06); }
   .opts-action:active { transform: scale(0.97); }
+
+  /* PWA Install Button */
+  #install-btn {
+    position: fixed; bottom: 16px; left: 16px; z-index: 100;
+    background: var(--panel-bg); color: var(--text);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+    padding: 8px 16px; font: 600 13px/1 'Courier New', monospace;
+    cursor: pointer; letter-spacing: 0.5px;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s, opacity 0.4s;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    opacity: 0; pointer-events: none;
+  }
+  #install-btn.visible { opacity: 1; pointer-events: auto; }
+  #install-btn:hover { border-color: var(--accent); background: rgba(15,25,42,0.95); }
+  #install-btn:active { transform: scale(0.96); }
 </style>
 </head>
 <body>
 <canvas id="c" aria-label="Interactive soft-body blob simulation"></canvas>
 
 <button id="opts-btn">Options</button>
+<button id="install-btn" aria-label="Install app">Install App</button>
 <div id="opts-panel">
   <div class="opts-title">Physics</div>
 
@@ -251,6 +275,230 @@
 </div>
 
 <script>
+/* ==========================================================
+   PWA SETUP — Icon generation, manifest, service worker
+   ========================================================== */
+(function setupPWA() {
+  /* Generate a PNG icon on a canvas (works everywhere including iOS) */
+  function generateIcon(size, maskable) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const x = c.getContext('2d');
+    const pad = maskable ? size * 0.12 : 0;
+    const inner = size - pad * 2;
+
+    /* Background */
+    x.fillStyle = '#0d1b2a';
+    x.fillRect(0, 0, size, size);
+
+    /* Rounded rect clip */
+    const rr = size * 0.18;
+    x.beginPath();
+    x.moveTo(rr, 0);
+    x.lineTo(size - rr, 0);
+    x.arcTo(size, 0, size, rr, rr);
+    x.lineTo(size, size - rr);
+    x.arcTo(size, size, size - rr, size, rr);
+    x.lineTo(rr, size);
+    x.arcTo(0, size, 0, size - rr, rr);
+    x.lineTo(0, rr);
+    x.arcTo(0, 0, rr, 0, rr);
+    x.closePath();
+    x.clip();
+    x.fillStyle = '#0d1b2a';
+    x.fillRect(0, 0, size, size);
+
+    /* Blob body */
+    const cx = size * 0.5, cy = size * (maskable ? 0.56 : 0.54);
+    const br = inner * (maskable ? 0.24 : 0.28);
+    const grad = x.createRadialGradient(cx - br * 0.3, cy - br * 0.4, 0, cx, cy, br);
+    grad.addColorStop(0, '#e8a860');
+    grad.addColorStop(0.5, '#d97a3a');
+    grad.addColorStop(1, '#a04520');
+    x.beginPath();
+    x.arc(cx, cy, br, 0, Math.PI * 2);
+    x.fillStyle = grad;
+    x.fill();
+
+    /* Antenna stalk */
+    const antBase = cy - br;
+    const antTip = antBase - inner * (maskable ? 0.1 : 0.12);
+    x.strokeStyle = '#a04520';
+    x.lineWidth = Math.max(1, size * 0.015);
+    x.lineCap = 'round';
+    x.beginPath();
+    x.moveTo(cx, antBase);
+    x.quadraticCurveTo(cx + br * 0.08, (antBase + antTip) * 0.5, cx, antTip);
+    x.stroke();
+
+    /* Antenna ball */
+    const ballR = Math.max(2, inner * (maskable ? 0.025 : 0.03));
+    x.beginPath();
+    x.arc(cx, antTip - ballR * 0.5, ballR, 0, Math.PI * 2);
+    const ballG = x.createRadialGradient(cx - ballR * 0.3, antTip - ballR * 0.8, 0, cx, antTip - ballR * 0.5, ballR);
+    ballG.addColorStop(0, '#f0c080');
+    ballG.addColorStop(1, '#d97a3a');
+    x.fillStyle = ballG;
+    x.fill();
+
+    /* Eyes — whites */
+    const eyeY = cy - br * 0.08;
+    const esp = br * 0.34;
+    const ew = br * 0.13, eh = br * 0.16;
+    x.fillStyle = '#ffffff';
+    x.beginPath(); x.ellipse(cx - esp, eyeY, ew, eh, 0, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.ellipse(cx + esp, eyeY, ew, eh, 0, 0, Math.PI * 2); x.fill();
+
+    /* Eyes — pupils */
+    const pr = br * 0.07;
+    x.fillStyle = '#1a1a2e';
+    x.beginPath(); x.arc(cx - esp + pr * 0.3, eyeY + pr * 0.3, pr, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.arc(cx + esp + pr * 0.3, eyeY + pr * 0.3, pr, 0, Math.PI * 2); x.fill();
+
+    /* Eye highlights */
+    const hr = pr * 0.4;
+    x.fillStyle = 'rgba(255,255,255,0.7)';
+    x.beginPath(); x.arc(cx - esp - hr * 0.5, eyeY - hr, hr, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.arc(cx + esp - hr * 0.5, eyeY - hr, hr, 0, Math.PI * 2); x.fill();
+
+    /* Mouth */
+    x.strokeStyle = '#1a1a2e';
+    x.lineWidth = Math.max(1, size * 0.012);
+    x.lineCap = 'round';
+    x.beginPath();
+    x.arc(cx, cy + br * 0.2, br * 0.17, 0.15 * Math.PI, 0.85 * Math.PI);
+    x.stroke();
+
+    return c.toDataURL('image/png');
+  }
+
+  const icon192 = generateIcon(192, false);
+  const icon512 = generateIcon(512, false);
+  const iconMask192 = generateIcon(192, true);
+  const iconMask512 = generateIcon(512, true);
+
+  /* Set favicon */
+  const fav = document.createElement('link');
+  fav.rel = 'icon'; fav.type = 'image/png'; fav.href = icon192;
+  document.head.appendChild(fav);
+
+  /* Set apple-touch-icon */
+  const ati = document.createElement('link');
+  ati.rel = 'apple-touch-icon'; ati.href = icon192;
+  document.head.appendChild(ati);
+
+  /* Inject Web App Manifest via Blob URL */
+  const manifest = {
+    name: 'Soft Blob',
+    short_name: 'Blob',
+    description: 'Interactive soft-body blob simulation',
+    start_url: '.',
+    scope: '.',
+    display: 'standalone',
+    background_color: '#0d1b2a',
+    theme_color: '#0d1b2a',
+    orientation: 'any',
+    icons: [
+      { src: icon192,      sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: icon512,      sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: iconMask192,  sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: iconMask512,  sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+    ]
+  };
+  const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const manifestLink = document.createElement('link');
+  manifestLink.rel = 'manifest';
+  manifestLink.href = URL.createObjectURL(manifestBlob);
+  document.head.appendChild(manifestLink);
+
+  /* Register Service Worker (best-effort via Blob URL) */
+  if ('serviceWorker' in navigator) {
+    const swCode = `
+      'use strict';
+      var CACHE_NAME = 'soft-blob-v1';
+
+      self.addEventListener('install', function(e) {
+        e.waitUntil(
+          caches.open(CACHE_NAME).then(function(cache) {
+            return cache.addAll(['./']);
+          })
+        );
+        self.skipWaiting();
+      });
+
+      self.addEventListener('activate', function(e) {
+        e.waitUntil(
+          caches.keys().then(function(names) {
+            return Promise.all(
+              names.filter(function(n) { return n !== CACHE_NAME; })
+                   .map(function(n) { return caches.delete(n); })
+            );
+          })
+        );
+        self.clients.claim();
+      });
+
+      self.addEventListener('fetch', function(e) {
+        e.respondWith(
+          caches.match(e.request).then(function(cached) {
+            if (cached) return cached;
+            return fetch(e.request).then(function(response) {
+              if (response && response.ok && response.type === 'basic') {
+                var clone = response.clone();
+                caches.open(CACHE_NAME).then(function(cache) {
+                  cache.put(e.request, clone);
+                });
+              }
+              return response;
+            }).catch(function() {
+              return caches.match('./');
+            });
+          })
+        );
+      });
+    `;
+    try {
+      var swBlob = new Blob([swCode], { type: 'application/javascript' });
+      var swURL = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swURL, { scope: './' }).catch(function() {
+        /* Blob URL SW not supported in this browser — graceful fallback.
+           The manifest + meta tags still enable iOS install and standalone mode. */
+      });
+    } catch (_) { /* silently ignore */ }
+  }
+
+  /* Handle install prompt — show the install button */
+  var installBtn = document.getElementById('install-btn');
+  var deferredPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', function(e) {
+    e.preventDefault();
+    deferredPrompt = e;
+    installBtn.classList.add('visible');
+  });
+
+  installBtn.addEventListener('click', function() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(function(choice) {
+      if (choice.outcome === 'accepted') {
+        installBtn.classList.remove('visible');
+      }
+      deferredPrompt = null;
+    });
+  });
+
+  window.addEventListener('appinstalled', function() {
+    installBtn.classList.remove('visible');
+    deferredPrompt = null;
+  });
+
+  /* Hide install button if already in standalone mode */
+  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+    installBtn.style.display = 'none';
+  }
+})();
+
 /* ==========================================================
    SOFT-BODY BLOB — Full physics, size & color options
    ========================================================== */
@@ -609,7 +857,7 @@ function evtPos(e) {
 }
 
 function onPointerDown(e) {
-  if (e.target.closest('#opts-panel') || e.target.closest('#opts-btn')) return;
+  if (e.target.closest('#opts-panel') || e.target.closest('#opts-btn') || e.target.closest('#install-btn')) return;
   e.preventDefault();
   const p = evtPos(e);
   mouse.x = p.x; mouse.y = p.y;
@@ -627,7 +875,7 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
-  if (e.target.closest('#opts-panel')) return;
+  if (e.target.closest('#opts-panel') || e.target.closest('#install-btn')) return;
   e.preventDefault();
   const p = evtPos(e);
   mouse.x = p.x; mouse.y = p.y;
@@ -641,7 +889,7 @@ function onPointerMove(e) {
 }
 
 function onPointerUp(e) {
-  if (e.target.closest('#opts-panel') || e.target.closest('#opts-btn')) return;
+  if (e.target.closest('#opts-panel') || e.target.closest('#opts-btn') || e.target.closest('#install-btn')) return;
   e.preventDefault();
   if (isDown && !dragMoved) poke(mouse.x, mouse.y);
   isDown = false; isDragging = false; dragMode = null; dragNode = null;
@@ -683,7 +931,7 @@ canvas.addEventListener('touchend', onPointerUp, { passive: false });
 canvas.addEventListener('touchcancel', onPointerUp, { passive: false });
 
 canvas.addEventListener('dblclick', (e) => {
-  if (e.target.closest('#opts-panel') || e.target.closest('#opts-btn')) return;
+  if (e.target.closest('#opts-panel') || e.target.closest('#opts-btn') || e.target.closest('#install-btn')) return;
   e.preventDefault();
   blobHue = Math.random() * 360;
   updateColors();
@@ -905,11 +1153,7 @@ function drawBlob() {
   traceSpline(); ctx.fillStyle = 'rgba(0,0,0,0.01)'; ctx.fill();
   ctx.restore();
 
-  /* ---- Body: your face sticker IS the blob body ----
-     The sticker is clipped to the deformed blob spline, so it squashes /
-     stretches with the soft-body physics and breathing. The antenna stays
-     drawn separately on top. */
-  faceExprTicked(); /* keep expression timer + blink/surprised timers running */
+  faceExprTicked();
 
   const bodyImg = FACE.imgs[faceExpr];
   const prevImg = FACE.imgs[faceExprPrev];
@@ -917,22 +1161,14 @@ function drawBlob() {
 
   ctx.save();
   traceSpline();
-  ctx.clip(); /* clip the sticker to the blob outline → it deforms with the body */
+  ctx.clip();
   if (bodyReady) {
-    /* Map the sticker EXACTLY onto the blob's live bounding box:
-       - left edge of sticker  -> blob's leftmost  node,
-       - right edge            -> blob's rightmost node,
-       - top edge              -> blob's topmost   node,
-       - bottom edge           -> blob's lowest    node.
-       So when the soft body squashes flat or stretches tall, the image
-       deforms in lock-step, just like the orange gradient body did. */
     let l = Infinity, ri = -Infinity, t = Infinity, b = -Infinity;
     for (const n of nodes) { l = Math.min(l, n.x); ri = Math.max(ri, n.x); t = Math.min(t, n.y); b = Math.max(b, n.y); }
     const bw = Math.max(ri - l, 1), bh = Math.max(b - t, 1);
-    const dx = l, dy = t; /* anchor: top-left corner of the deformed box */
+    const dx = l, dy = t;
     const dw = bw,    dh = bh;
 
-    /* crossfade old -> new so the swap doesn't pop */
     faceSwapT = Math.min(1, faceSwapT + (1 / 60) / (FACE_SWAP_MS / 1000));
     if (faceSwapT < 1 && prevImg && prevImg.complete && prevImg.naturalWidth) {
       ctx.globalAlpha = 1 - faceSwapT;
@@ -941,7 +1177,6 @@ function drawBlob() {
     ctx.globalAlpha = faceSwapT;
     ctx.drawImage(bodyImg, dx, dy, dw, dh);
   } else {
-    /* fallback: original gradient body while images load */
     const gOff = r * 0.3;
     const grad = ctx.createRadialGradient(
       center.x - gOff, center.y - gOff * 1.3, r * 0.05,
@@ -956,7 +1191,6 @@ function drawBlob() {
   }
   ctx.restore();
 
-  /* soft outline so the body still reads as a 3D shape */
   ctx.save();
   traceSpline();
   ctx.strokeStyle = 'rgba(0,0,0,0.18)';
@@ -964,8 +1198,6 @@ function drawBlob() {
   ctx.stroke();
   ctx.restore();
 
-  /* gentle spherical shading on top of the sticker — top-left highlight,
-     bottom-right vignette — so the blob keeps its 3D feel */
   ctx.save();
   traceSpline();
   ctx.clip();
@@ -984,18 +1216,11 @@ function drawBlob() {
   drawAntenna();
 }
 
-/* ==================== FACE (sticker-swap) ====================
-   6 PNG stickers, all loaded at startup:
-     face_idle / face_blink / face_lookLeft / face_lookRight /
-     face_surprised / face_happy
-   The active one is drawn fit to the blob's live bounding box so it
-   squashes/stretches with the soft body and breathing. Swaps
-   crossfade ~140ms so they don't pop.
-   ============================================================ */
+/* ==================== FACE (sticker-swap) ==================== */
 const FACE = {
   list: ['face_idle','face_blink','face_lookLeft','face_lookRight','face_surprised','face_happy'],
   imgs: {}, ready: false, loadedCount: 0,
-  card: 1.0 /* aspect w/h of source stickers; corrected when first img loads */
+  card: 1.0
 };
 FACE.list.forEach(name => {
   const im = new Image();
@@ -1009,9 +1234,8 @@ FACE.list.forEach(name => {
   FACE.imgs[name] = im;
 });
 
-/* Expression state */
 let faceExpr = 'face_idle', faceExprPrev = 'face_idle';
-let faceSwapT = 1 /* 0..1 progress of crossfade */;
+let faceSwapT = 1;
 let faceBlinkT = 0, faceNextBlink = 2 + Math.random() * 3;
 let faceBlinkOn = false, faceBlinkUntil = 0;
 let faceTime = 0;
@@ -1027,12 +1251,10 @@ function setFaceExpr(next) {
 
 function pickExpression() {
   const speed = getSpeed();
-  /* priority order — highest first */
   if (surpriseTimer > 0.05 || speed > 240) return 'face_surprised';
   if (dragMode !== null && isDragging)       return 'face_happy';
   if (faceBlinkOn)                           return 'face_blink';
 
-  /* eye follow: mouse relative to blob center, only on X axis */
   const c = getCenter();
   const dx = mouse.x - c.x;
   const reach = blobR * 0.95;
@@ -1042,8 +1264,6 @@ function pickExpression() {
 }
 
 function faceExprTicked() {
-  /* Runs once per drawBlob. Updates: surprise timer, random blink timer,
-     and the active expression per the priority in pickExpression(). */
   faceTime += 1 / 60;
   surpriseTimer = Math.max(0, surpriseTimer - (1 / 60));
 
@@ -1157,7 +1377,6 @@ function init() {
   mouse.y = H / 2;
   createBlob();
   initParticles();
-  /* Sync color picker to initial hue */
   colorInput.value = hslToHex(blobHue, 68, 52);
   requestAnimationFrame(loop);
 }
